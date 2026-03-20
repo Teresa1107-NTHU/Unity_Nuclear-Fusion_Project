@@ -1,3 +1,7 @@
-# Teresa1107-NTHU-Nuclear-Fusion-Reaction-p-B-Virtual-System
-桌上型核融合體驗系統 ── 以 p–B¹¹ 反應為核心的安全模擬設計<br>
+# Nuclear Fusion Virtual System
+
+## 專案名稱
+桌上型核融合體驗系統 ── 以 p–B¹¹ 反應為核心的安全模擬設計  
+
+## 最近更新日期
 2026/03/20
