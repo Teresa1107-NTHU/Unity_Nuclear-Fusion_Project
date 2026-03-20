@@ -1,39 +1,23 @@
-# ---- Unity 專案常規忽略 ----
-[Ll]ibrary/
-[Tt]emp/
-[Oo]bj/
-[Bb]uild/
-[Bb]uilds/
-[Ll]ogs/
-[Mm]emoryCaptures/
-[Rr]ecordings/
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
 
-# 套件快取（會由 manifest 重新還原）
-[Pp]ackages/PackageCache/
-
-# Rider / VS / VSCode / Xcode
-.idea/
-.vs/
-.vscode/
+*.log
 *.csproj
+*.unityproj
 *.sln
+*.suo
+*.tmp
 *.user
 *.userprefs
 *.pidb
+*.booproj
 *.svd
 *.pdb
-*.mdb
 
-# OS
 .DS_Store
 Thumbs.db
-
-# 其他常見
-*.unitypackage
-*.apk
-*.aab
-*.ipa
-
-# 如果你有自定輸出資料夾（例如 Export/ 或 Output/），也加進來：
-# Export/
-# Output/

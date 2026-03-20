@@ -6,297 +6,491 @@ using TMPro;
 
 public class FusionController : MonoBehaviour
 {
+    private enum FusionPhase
+    {
+        Idle,       // 尚未開始
+        Running,    // 反應中
+        Finished    // 反應結束，停在最後畫面
+    }
+
     // ===== Scene objects =====
     [Header("Scene References")]
-    [SerializeField] private Transform proton;    // 場景左側的 H-1（請拖場景中的實例）
-    [SerializeField] private Transform boron11;   // 場景右側的 B-11（請拖場景中的實例）
-    [SerializeField] private Transform meetPoint; // 反應發生點（中心空物件）
+    [SerializeField] private Transform proton;    // 場景中的 H-1
+    [SerializeField] private Transform boron11;   // 場景中的 B-11
+    [SerializeField] private Transform meetPoint; // 反應中心
 
     // ===== UI =====
     [Header("UI")]
-    [SerializeField] private Button startButton;
+    [SerializeField] private Button startButton;       // 單一按鈕：Start / Restart
+    [SerializeField] private TMP_Text startButtonText;   // 按鈕上的字
+    [SerializeField] private Button pauseButton;       // 可選：Pause / Resume
+    [SerializeField] private TMP_Text pauseButtonText;
     [SerializeField] private TMP_Text statusText;
-    [SerializeField] private Slider energyBar;    // 可留空
-    [SerializeField] private TMP_Text energyText; // 顯示 "8.70 MeV"
+    [SerializeField] private Slider energyBar;
+    [SerializeField] private TMP_Text energyText;
 
-    // ===== FX =====
-    [Header("FX")]
-    [SerializeField] private ParticleSystem protonApproachFx; // 左能量流
-    [SerializeField] private ParticleSystem boronApproachFx;  // 右能量流
-    [SerializeField] private ParticleSystem flashFx;          // 中央閃光
-    [SerializeField] private ParticleSystem energyBurstFx;    // 能量爆發粒子
-
-    // ===== Nucleus prefabs (生成用) =====
+    // ===== Nucleus Prefabs =====
     [Header("Nucleus Prefabs")]
-    [SerializeField] private GameObject nucleusB11Prefab;
     [SerializeField] private GameObject nucleusC12Prefab;
     [SerializeField] private GameObject nucleusBe8Prefab;
     [SerializeField] private GameObject nucleusHe4Prefab;
 
-    // ===== Motion tuning =====
-    [Header("Motion")]
-    [SerializeField] private float approachTime = 2.0f; // 靠近時間
-    [SerializeField]
-    private AnimationCurve approachCurve =
-        AnimationCurve.EaseInOut(0, 0, 1, 1);
+    // ===== Timing =====
+    [Header("Timing")]
+    [SerializeField] private float approachTime = 2.0f; // H & B 靠近時間
+    [SerializeField] private float c12ExcitedTime = 1.5f;  // C-12* 脈動時間
+    [SerializeField] private float be8DisplayTime = 1.8f;  // Be-8 不穩定晃動時間
+    [SerializeField] private float betweenStagesGap = 0.4f;  // 各階段之間的小停頓
 
-    // ===== He-4 tuning =====
-    [Header("He-4 Flight")]
-    [SerializeField] private float he4Speed = 6f;
-    [SerializeField] private float he4Life = 4f; // 最大壽命（秒）
+    // ===== He-4 Flight & Parking =====
+    [Header("He-4 Movement & Parking")]
+    [SerializeField] private float he4BaseSpeed = 4f;   // 一開始飛出的速度
+    [SerializeField] private float heFlyTime = 0.7f; // 從中心飛出的時間
+    [SerializeField] private float heMoveToSlotTime = 0.8f; // 從飛行位置移動到右下角格子的時間
 
-    // ===== Energy display =====
-    [Header("Energy")]
-    [SerializeField] private float fusionMeV = 8.7f;
+    [SerializeField] private Transform heParkingAnchor; // He 集中停靠的起始位置（右下角）
+    [SerializeField] private int hePerRow = 4;   // 每列最多放幾顆 He
+    [SerializeField] private float heSlotSpacingX = 0.6f; // He 格子在 x 方向的間距
+    [SerializeField] private float heSlotSpacingY = 0.45f; // He 格子在 y 方向的間距
+
+    // ===== Energy (MeV) =====
+    [Header("Energy (MeV)")]
+    [SerializeField] private float energyAlpha1 = 3.76f; // 第一顆 He
+    [SerializeField] private float energyAlpha2 = 2.46f; // 第二、第三顆 He
+
+    private float currentEnergy = 0f;
 
     // ===== Runtime =====
-    private Vector3 protonStartPos, boronStartPos;
-    private bool busy = false;
+    private Vector3 protonStartPos;
+    private Vector3 boronStartPos;
 
-    // 生成的臨時核種與 He-4 清單（避免殘留）
-    private GameObject lastB11, lastC12, lastBe8;
-    private readonly List<GameObject> activeHe4 = new List<GameObject>();
+    private bool isPaused = false;
+    private bool busy = false;
+    private FusionPhase phase = FusionPhase.Idle;
+
+    private GameObject currentBe8;                     // C → He + Be 時產生的 Be 實例
+    private readonly List<GameObject> heProducts = new List<GameObject>(); // 場上所有 He
 
     private void Awake()
     {
-        // 快速檢查（避免未指派）
-        if (!proton || !boron11 || !meetPoint)
-        {
-            Debug.LogError("FusionController: 請在 Inspector 指派 Proton / Boron11 / MeetPoint。");
-        }
-
-        protonStartPos = proton ? proton.position : Vector3.zero;
-        boronStartPos = boron11 ? boron11.position : Vector3.zero;
+        protonStartPos = proton.position;
+        boronStartPos = boron11.position;
 
         if (startButton) startButton.onClick.AddListener(OnStartClicked);
+        if (pauseButton) pauseButton.onClick.AddListener(OnPauseClicked);
 
-        SetStatus("Idle");
-        if (energyBar) energyBar.value = 0f;
+        if (startButtonText) startButtonText.text = "Start";
+        if (pauseButtonText) pauseButtonText.text = "Pause";
+        if (statusText) statusText.text = "Idle";
         if (energyText) energyText.text = "0.00 MeV";
+        if (energyBar) energyBar.value = 0f;
 
-        SafeStop(protonApproachFx);
-        SafeStop(boronApproachFx);
-        SafeStop(flashFx);
-        SafeStop(energyBurstFx);
+        if (pauseButton) pauseButton.interactable = false;
+
+        Time.timeScale = 1f;
+        phase = FusionPhase.Idle;
     }
 
-    public void OnStartClicked()
+    private void OnDisable()
     {
-        if (busy) return;
-        StartCoroutine(RunFusion());
+        Time.timeScale = 1f;
+        isPaused = false;
     }
 
+    // =====================================================
+    // Start / Restart 按鈕行為（關鍵）
+    // =====================================================
+    private void OnStartClicked()
+    {
+        // Debug 看現在狀態
+        Debug.Log($"Start button clicked, phase = {phase}");
+
+        if (phase == FusionPhase.Running)
+        {
+            // 反應進行中，忽略 Start
+            return;
+        }
+
+        if (phase == FusionPhase.Finished)
+        {
+            // ★ 第一按：Restart → 只重設畫面到 Idle，不自動開始
+            ResetSceneToIdle();
+            phase = FusionPhase.Idle;
+
+            if (startButtonText) startButtonText.text = "Start";
+            SetStatus("Ready. Press Start to run again.");
+
+            return;
+        }
+
+        // phase == Idle → 真正開始跑
+        if (!busy)
+        {
+            StartCoroutine(RunFusion());
+        }
+    }
+
+    // =====================================================
+    // Pause / Resume
+    // =====================================================
+    private void OnPauseClicked()
+    {
+        if (phase != FusionPhase.Running) return;
+
+        isPaused = !isPaused;
+        Time.timeScale = isPaused ? 0f : 1f;
+
+        if (pauseButtonText)
+            pauseButtonText.text = isPaused ? "Resume" : "Pause";
+
+        SetStatus(isPaused ? "Paused" : "Running...");
+    }
+
+    // =====================================================
+    // Main Fusion Sequence
+    // =====================================================
     private IEnumerator RunFusion()
     {
         busy = true;
-        SetStatus("Particles accelerating and approaching...");
+        phase = FusionPhase.Running;
+        isPaused = false;
+        Time.timeScale = 1f;
 
-        SafePlay(protonApproachFx);
-        SafePlay(boronApproachFx);
+        if (pauseButton)
+        {
+            pauseButton.interactable = true;
+            if (pauseButtonText) pauseButtonText.text = "Pause";
+        }
+        if (startButtonText) startButtonText.text = "Running...";
 
-        // 兩球靠近
+        SetStatus("Proton approaching B-11...");
+
+        // --- 1. H & B 靠近中心 ---
         float t = 0f;
         while (t < 1f)
         {
-            t += Time.deltaTime / Mathf.Max(0.0001f, approachTime);
-            float k = approachCurve.Evaluate(Mathf.Clamp01(t));
+            t += Time.deltaTime / Mathf.Max(0.01f, approachTime);
+            float k = Mathf.Clamp01(t);
 
-            if (proton)
-                proton.position = Vector3.Lerp(protonStartPos,
-                    meetPoint.position + Vector3.left * 0.20f, k);
-
-            if (boron11)
-                boron11.position = Vector3.Lerp(boronStartPos,
-                    meetPoint.position + Vector3.right * 0.20f, k);
-
-            yield return null;
-        }
-
-        SafeStop(protonApproachFx, true);
-        SafeStop(boronApproachFx, true);
-
-        // 閃光
-        SetStatus("Quantum tunneling succeeded! Fusion triggered!");
-        if (flashFx)
-        {
-            flashFx.transform.position = meetPoint.position;
-            flashFx.Play();
-        }
-
-        // 隱藏原始兩球
-        if (proton) proton.gameObject.SetActive(false);
-        if (boron11) boron11.gameObject.SetActive(false);
-
-        // --- 生成 B-11（展示外殼） ---
-        lastB11 = Instantiate(nucleusB11Prefab, meetPoint.position, Quaternion.identity);
-        var atomB11 = lastB11.GetComponent<Atom>();
-        if (atomB11) StartCoroutine(atomB11.FadeInShell(0.5f));
-
-        yield return new WaitForSeconds(0.5f);
-
-        // --- 形成 C-12（短暫） ---
-        SetStatus("Forming C-12 (transient)...");
-        lastC12 = Instantiate(nucleusC12Prefab, meetPoint.position, Quaternion.identity);
-        var atomC12 = lastC12.GetComponent<Atom>();
-        if (atomC12) StartCoroutine(atomC12.FadeInShell(0.4f));
-
-        if (atomB11) StartCoroutine(atomB11.FadeOutShell(0.3f));
-        if (lastB11) Destroy(lastB11, 0.7f);
-
-        yield return new WaitForSeconds(0.5f);
-
-        // --- 衰變為 Be-8 ---
-        SetStatus("Decaying to Be-8...");
-        lastBe8 = Instantiate(nucleusBe8Prefab, meetPoint.position, Quaternion.identity);
-        var atomBe8 = lastBe8.GetComponent<Atom>();
-        if (atomBe8) StartCoroutine(atomBe8.FadeInShell(0.35f));
-
-        if (lastC12) Destroy(lastC12, 0.7f);
-
-        yield return new WaitForSeconds(0.5f);
-
-        // --- Be-8 → 3 × He-4 ---
-        SetStatus("Be-8 decays → 3 × He-4 (alpha)!");
-        if (atomBe8) StartCoroutine(atomBe8.FadeOutShell(0.25f));
-
-        SpawnHe4Triplet(meetPoint.position);
-        if (lastBe8) Destroy(lastBe8, 1.0f);
-
-        // 能量視覺
-        ShowEnergyVisual(fusionMeV);
-
-        yield return new WaitForSeconds(1.8f);
-
-        // 重置
-        ResetForNext();
-        busy = false;
-    }
-
-    // 生成 3 顆 He-4，速度向外並加入集中管理
-    private void SpawnHe4Triplet(Vector3 origin)
-    {
-        Vector3[] dirs =
-        {
-            Vector3.forward,
-            Quaternion.Euler(0f, 120f, 0f) * Vector3.forward,
-            Quaternion.Euler(0f, 240f, 0f) * Vector3.forward
-        };
-
-        for (int i = 0; i < 3; i++)
-        {
-            GameObject go = Instantiate(nucleusHe4Prefab, origin, Quaternion.identity);
-
-            var rb = go.GetComponent<Rigidbody>();
-            if (!rb) rb = go.AddComponent<Rigidbody>();
-            rb.useGravity = false;
-            rb.mass = 0.01f;
-            rb.drag = 0.1f;
-
-            Vector3 jitter = new Vector3(
-                Random.Range(-0.2f, 0.2f),
-                Random.Range(-0.2f, 0.2f),
-                Random.Range(-0.2f, 0.2f)
+            proton.position = Vector3.Lerp(
+                protonStartPos,
+                meetPoint.position + Vector3.left * 0.2f,
+                k
             );
-            rb.velocity = dirs[i].normalized * he4Speed + jitter;
+            boron11.position = Vector3.Lerp(
+                boronStartPos,
+                meetPoint.position + Vector3.right * 0.2f,
+                k
+            );
 
-            // 壽命：避免殘留，最多 2.5s
-            float life = Mathf.Min(he4Life, 2.5f);
-            Destroy(go, life);
-
-            activeHe4.Add(go);
+            yield return null;
         }
-    }
 
-    // 能量數字、能量條與粒子
-    private void ShowEnergyVisual(float mev)
-    {
-        if (energyBurstFx)
+        // H & B 消失 → 代表已結合成 C
+        proton.gameObject.SetActive(false);
+        boron11.gameObject.SetActive(false);
+
+        yield return new WaitForSeconds(0.2f);
+
+        // --- 2. C-12* 激發態 + 破裂成 He + Be ---
+        yield return ShowC12ExcitedAndBreak();
+        yield return new WaitForSeconds(betweenStagesGap);
+
+        // --- 3. Be-8 衰變到 2 He ---
+        if (currentBe8 != null)
         {
-            energyBurstFx.transform.position = meetPoint.position;
-            energyBurstFx.Play();
+            yield return ShowBe8Decay(currentBe8);
+            currentBe8 = null;
         }
 
-        if (energyText)
-            StartCoroutine(CountUpEnergy(mev, 1.2f));
+        // 反應完成：停在最後畫面，不重置
+        yield return new WaitForSeconds(0.5f);
 
-        if (energyBar)
-            StartCoroutine(FillEnergyBar(1.2f));
+        phase = FusionPhase.Finished;
+        busy = false;
+        isPaused = false;
+        Time.timeScale = 1f;
+
+        if (pauseButton) pauseButton.interactable = false;
+        if (startButtonText) startButtonText.text = "Restart";
+
+        SetStatus("Fusion finished. Check products, then press Restart.");
     }
 
-    private IEnumerator CountUpEnergy(float mev, float duration)
+    // =====================================================
+    // C-12*：脈動 → 收縮 → 破裂成 He + Be
+    // =====================================================
+    private IEnumerator ShowC12ExcitedAndBreak()
     {
+        SetStatus("C-12* excited (unstable)");
+
+        GameObject c12 = Instantiate(nucleusC12Prefab, meetPoint.position, Quaternion.identity);
+        Transform tf = c12.transform;
+        Atom atom = c12.GetComponent<Atom>();
+
+        Vector3 baseScale = tf.localScale;
+
+        if (atom) StartCoroutine(atom.FadeInShell(0.4f));
+
+        // 輕微脈動
         float t = 0f;
-        float start = 0f;
+        while (t < c12ExcitedTime)
+        {
+            t += Time.deltaTime;
+            float k = t / c12ExcitedTime;
+
+            float pulse = 1f + 0.06f * Mathf.Sin(k * Mathf.PI * 4f);
+            tf.localScale = baseScale * pulse;
+
+            yield return null;
+        }
+
+        // 爆之前收縮一下
+        float shrinkTime = 0.12f;
+        t = 0f;
+        while (t < shrinkTime)
+        {
+            t += Time.deltaTime;
+            float k = t / shrinkTime;
+            tf.localScale = Vector3.Lerp(baseScale, baseScale * 0.6f, k);
+            yield return null;
+        }
+
+        // 這一瞬間：C → He + Be
+        SetStatus("C-12 → He-4 + Be-8");
+
+        // 第一顆 He（高能，往右上）
+        SpawnHe_First(meetPoint.position);
+        AddEnergy(energyAlpha1, 0.6f);
+
+        // Be-8（留在中心，後續再衰變）
+        currentBe8 = Instantiate(nucleusBe8Prefab, meetPoint.position, Quaternion.identity);
+        Atom beAtom = currentBe8.GetComponent<Atom>();
+        if (beAtom) StartCoroutine(beAtom.FadeInShell(0.15f));
+
+        Destroy(c12);
+    }
+
+    // =====================================================
+    // Be-8：晃動 → 收縮 → 2 He
+    // =====================================================
+    private IEnumerator ShowBe8Decay(GameObject be)
+    {
+        SetStatus("Be-8 unstable decay");
+
+        Transform tf = be.transform;
+        Atom atom = be.GetComponent<Atom>();
+
+        Vector3 basePos = tf.position;
+        Vector3 baseScale = tf.localScale;
+
+        // 抖動階段
+        float t = 0f;
+        float shakeTime = be8DisplayTime * 0.8f;
+
+        while (t < shakeTime)
+        {
+            t += Time.deltaTime;
+            float k = t / shakeTime;
+
+            float shakePosAmp = 0.03f;
+            float shakeScaleAmp = 0.04f;
+
+            Vector3 offset = new Vector3(
+                Mathf.Sin(k * Mathf.PI * 10f) * shakePosAmp,
+                Mathf.Cos(k * Mathf.PI * 11f) * shakePosAmp,
+                0f
+            );
+            tf.position = basePos + offset;
+
+            float sPulse = 1f + shakeScaleAmp * Mathf.Sin(k * Mathf.PI * 8f);
+            tf.localScale = baseScale * sPulse;
+
+            yield return null;
+        }
+
+        // 收縮段
+        float squeezeTime = be8DisplayTime * 0.2f;
+        t = 0f;
+        while (t < squeezeTime)
+        {
+            t += Time.deltaTime;
+            float k = t / squeezeTime;
+            tf.position = basePos;
+            tf.localScale = Vector3.Lerp(baseScale, baseScale * 0.5f, k);
+            yield return null;
+        }
+
+        // Be 消失，同時產生兩顆 He
+        SetStatus("Be-8 → He-4 + He-4");
+
+        SpawnHe_Double(basePos);
+        AddEnergy(energyAlpha2, 0.5f); // He #2
+        AddEnergy(energyAlpha2, 0.5f); // He #3
+
+        if (atom) StartCoroutine(atom.FadeOutShell(0.2f));
+        Destroy(be);
+    }
+
+    // =====================================================
+    // He emission：飛出去 → 收集到右下角
+    // =====================================================
+    private void SpawnHe_First(Vector3 origin)
+    {
+        Vector3 dir = new Vector3(0.5f, 0.7f, 0f).normalized;
+        SpawnHe(origin, dir, he4BaseSpeed * 1.2f);
+    }
+
+    private void SpawnHe_Double(Vector3 origin)
+    {
+        Vector3 dir1 = new Vector3(0.85f, -0.2f, 0f).normalized;
+        Vector3 dir2 = new Vector3(0.4f, -0.8f, 0f).normalized;
+
+        SpawnHe(origin, dir1, he4BaseSpeed);
+        SpawnHe(origin, dir2, he4BaseSpeed);
+    }
+
+    private void SpawnHe(Vector3 origin, Vector3 dir, float speed)
+    {
+        if (!nucleusHe4Prefab) return;
+
+        GameObject go = Instantiate(nucleusHe4Prefab, origin, Quaternion.identity);
+        heProducts.Add(go);
+
+        Rigidbody rb = go.GetComponent<Rigidbody>();
+        if (!rb) rb = go.AddComponent<Rigidbody>();
+
+        rb.useGravity = false;
+        rb.mass = 0.01f;
+        rb.drag = 0.0f;
+        rb.velocity = dir.normalized * speed;
+
+        int slotIndex = heProducts.Count - 1;
+        StartCoroutine(HeLifeRoutine(go.transform, rb, slotIndex));
+    }
+
+    private IEnumerator HeLifeRoutine(Transform tf, Rigidbody rb, int slotIndex)
+    {
+        if (tf == null || rb == null) yield break;
+
+        // 第一階段：從中心飛出一小段時間
+        float t = 0f;
+        while (t < heFlyTime)
+        {
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        // 第二階段：停止物理，移動到右下角停靠格子
+        rb.velocity = Vector3.zero;
+        rb.isKinematic = true;
+
+        Vector3 startPos = tf.position;
+        Vector3 targetPos = startPos;
+
+        if (heParkingAnchor != null)
+        {
+            int col = slotIndex % hePerRow;
+            int row = slotIndex / hePerRow;
+
+            Vector3 offset = new Vector3(
+                col * heSlotSpacingX,
+                -row * heSlotSpacingY,
+                0f
+            );
+            targetPos = heParkingAnchor.position + offset;
+        }
+
+        t = 0f;
+        while (t < heMoveToSlotTime)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / heMoveToSlotTime);
+            tf.position = Vector3.Lerp(startPos, targetPos, k);
+            yield return null;
+        }
+
+        tf.position = targetPos;
+    }
+
+    // =====================================================
+    // Energy UI
+    // =====================================================
+    private void AddEnergy(float deltaMeV, float duration)
+    {
+        StartCoroutine(EnergyRoutine(deltaMeV, duration));
+    }
+
+    private IEnumerator EnergyRoutine(float deltaMeV, float duration)
+    {
+        float start = currentEnergy;
+        float target = currentEnergy + deltaMeV;
+        currentEnergy = target;
+
+        float t = 0f;
+        float total = energyAlpha1 + 2f * energyAlpha2;
+
         while (t < duration)
         {
             t += Time.deltaTime;
-            float k = t / duration;
-            float val = Mathf.Lerp(start, mev, k);
-            energyText.text = val.ToString("F2") + " MeV";
+            float k = Mathf.Clamp01(t / duration);
+            float v = Mathf.Lerp(start, target, k);
+
+            if (energyText) energyText.text = v.ToString("F2") + " MeV";
+            if (energyBar && total > 0f) energyBar.value = v / total;
+
             yield return null;
         }
-        energyText.text = mev.ToString("F2") + " MeV";
+
+        if (energyText) energyText.text = target.ToString("F2") + " MeV";
+        if (energyBar && total > 0f) energyBar.value = target / total;
     }
 
-    private IEnumerator FillEnergyBar(float duration)
+    // =====================================================
+    // Reset（按 Restart 時才會呼叫）
+    // =====================================================
+    private void ResetSceneToIdle()
     {
-        float t = 0f;
-        float v0 = energyBar.value;
-        while (t < duration)
+        Time.timeScale = 1f;
+        isPaused = false;
+
+        // 刪掉所有 He
+        foreach (var he in heProducts)
         {
-            t += Time.deltaTime;
-            energyBar.value = Mathf.Lerp(v0, 1f, t / duration);
-            yield return null;
-        }
-        energyBar.value = 1f;
-    }
-
-    private void ResetForNext()
-    {
-        // 清理上一輪所有生成物
-        if (lastB11) Destroy(lastB11);
-        if (lastC12) Destroy(lastC12);
-        if (lastBe8) Destroy(lastBe8);
-        lastB11 = lastC12 = lastBe8 = null;
-
-        foreach (var he in activeHe4)
             if (he) Destroy(he);
-        activeHe4.Clear();
+        }
+        heProducts.Clear();
 
-        // 重設 UI
-        if (energyBar) energyBar.value = 0f;
+        // 刪掉 Be
+        if (currentBe8 != null)
+        {
+            Destroy(currentBe8);
+            currentBe8 = null;
+        }
+
+        // 清能量 UI
+        currentEnergy = 0f;
         if (energyText) energyText.text = "0.00 MeV";
+        if (energyBar) energyBar.value = 0f;
 
-        // 把原始兩球放回原位
-        if (proton)
-        {
-            proton.position = protonStartPos;
-            proton.gameObject.SetActive(true);
-        }
-        if (boron11)
-        {
-            boron11.position = boronStartPos;
-            boron11.gameObject.SetActive(true);
-        }
+        // H、B 回原位、顯示
+        proton.position = protonStartPos;
+        boron11.position = boronStartPos;
+        proton.gameObject.SetActive(true);
+        boron11.gameObject.SetActive(true);
+
+        if (pauseButton) pauseButton.interactable = false;
+        if (pauseButtonText) pauseButtonText.text = "Pause";
 
         SetStatus("Idle");
     }
 
+    // =====================================================
+    // Util
+    // =====================================================
     private void SetStatus(string msg)
     {
         if (statusText) statusText.text = msg;
         Debug.Log(msg);
-    }
-
-    // 安全控制粒子
-    private static void SafePlay(ParticleSystem ps)
-    {
-        if (ps) ps.Play();
-    }
-    private static void SafeStop(ParticleSystem ps, bool clear = true)
-    {
-        if (!ps) return;
-        ps.Stop(true, clear ? ParticleSystemStopBehavior.StopEmittingAndClear
-                            : ParticleSystemStopBehavior.StopEmitting);
     }
 }
