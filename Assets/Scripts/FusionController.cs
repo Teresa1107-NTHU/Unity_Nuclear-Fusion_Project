@@ -486,6 +486,77 @@ public class FusionController : MonoBehaviour
     }
 
     // =====================================================
+    // Web Control API
+    // 提供 FusionWebController 呼叫
+    // =====================================================
+
+    /// <summary>
+    /// 從網頁開始核融合反應。
+    /// Idle 狀態才會真正開始。
+    /// </summary>
+    public void WebStartFusion()
+    {
+        if (phase == FusionPhase.Idle && !busy)
+        {
+            OnStartClicked();
+        }
+    }
+
+
+    /// <summary>
+    /// 從網頁暫停反應。
+    /// </summary>
+    public void WebPauseFusion()
+    {
+        if (
+            phase == FusionPhase.Running &&
+            !isPaused
+        )
+        {
+            OnPauseClicked();
+        }
+    }
+
+
+    /// <summary>
+    /// 從網頁繼續反應。
+    /// </summary>
+    public void WebResumeFusion()
+    {
+        if (
+            phase == FusionPhase.Running &&
+            isPaused
+        )
+        {
+            OnPauseClicked();
+        }
+    }
+
+
+    /// <summary>
+    /// 從網頁重新設定核融合反應。
+    /// 不會自動開始下一次反應。
+    /// </summary>
+    public void WebRestartFusion()
+    {
+        StopAllCoroutines();
+
+        busy = false;
+        isPaused = false;
+
+        Time.timeScale = 1f;
+
+        ResetSceneToIdle();
+
+        phase = FusionPhase.Idle;
+
+        if (startButtonText)
+            startButtonText.text = "Start";
+
+        SetStatus("Ready.");
+    }
+
+    // =====================================================
     // Util
     // =====================================================
     private void SetStatus(string msg)
