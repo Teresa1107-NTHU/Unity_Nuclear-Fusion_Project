@@ -114,7 +114,97 @@
         createUnityInstance(canvas, config, (progress) => {
           progressBarFull.style.width = 100 * progress + "%";
         }).then((unityInstance) => {
-          loadingBar.style.display = "none";
+            loadingBar.style.display = "none";
+
+            /*
+             * 告訴外層 Alpha-E 網頁：
+             * Fusion Unity 已完成初始化。
+             */
+            window.parent.postMessage(
+                {
+                    source: "fusion-unity",
+                    type: "FusionReady"
+                },
+                "*"
+            );
+
+            /*
+             * 接收外層 Alpha-E 網頁
+             * 傳來的 Fusion 控制訊息。
+             */
+            window.addEventListener(
+                "message",
+                function (event) {
+
+                    const message =
+                        event.data;
+
+
+                    if (
+                        !message ||
+                        message.source !==
+                        "fusion-parent"
+                    ) {
+                        return;
+                    }
+
+
+                    console.log(
+                        "Fusion Unity 收到：",
+                        message
+                    );
+
+
+                    switch (message.type) {
+
+                        case "StartFusion":
+
+                            unityInstance.SendMessage(
+                                "FusionWebController",
+                                "StartFusion",
+                                message.action || "start"
+                            );
+
+                            break;
+
+
+                        case "PauseFusion":
+
+                            unityInstance.SendMessage(
+                                "FusionWebController",
+                                "PauseFusion",
+                                message.action || "pause"
+                            );
+
+                            break;
+
+
+                        case "ResumeFusion":
+
+                            unityInstance.SendMessage(
+                                "FusionWebController",
+                                "ResumeFusion",
+                                message.action || "resume"
+                            );
+
+                            break;
+
+
+                        case "RestartFusion":
+
+                            unityInstance.SendMessage(
+                                "FusionWebController",
+                                "RestartFusion",
+                                message.action || "restart"
+                            );
+
+                            break;
+
+                    }
+
+                }
+            );
+
           fullscreenButton.onclick = () => {
             unityInstance.SetFullscreen(1);
           };
