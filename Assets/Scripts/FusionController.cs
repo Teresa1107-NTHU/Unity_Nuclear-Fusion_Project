@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Runtime.InteropServices;
 
 public class FusionController : MonoBehaviour
 {
@@ -70,6 +71,14 @@ public class FusionController : MonoBehaviour
 
     private GameObject currentBe8;                     // C → He + Be 時產生的 Be 實例
     private readonly List<GameObject> heProducts = new List<GameObject>(); // 場上所有 He
+
+    #if UNITY_WEBGL && !UNITY_EDITOR
+    [DllImport("__Internal")]
+    private static extern void FusionSendStatus(string status);
+
+    [DllImport("__Internal")]
+    private static extern void FusionSendEnergy(float energy);
+    #endif
 
     private void Awake()
     {
@@ -436,14 +445,40 @@ public class FusionController : MonoBehaviour
             float k = Mathf.Clamp01(t / duration);
             float v = Mathf.Lerp(start, target, k);
 
-            if (energyText) energyText.text = v.ToString("F2") + " MeV";
-            if (energyBar && total > 0f) energyBar.value = v / total;
+            if (energyText)
+            {
+                energyText.text =
+                    v.ToString("F2") + " MeV";
+            }
+
+            if (energyBar && total > 0f)
+            {
+                energyBar.value =
+                    v / total;
+            }
+
+            #if UNITY_WEBGL && !UNITY_EDITOR
+            FusionSendEnergy(v);
+            #endif
 
             yield return null;
         }
 
-        if (energyText) energyText.text = target.ToString("F2") + " MeV";
-        if (energyBar && total > 0f) energyBar.value = target / total;
+        if (energyText)
+        {
+            energyText.text =
+                target.ToString("F2") + " MeV";
+        }
+
+        if (energyBar && total > 0f)
+        {
+            energyBar.value =
+                target / total;
+        }
+
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        FusionSendEnergy(target);
+        #endif
     }
 
     // =====================================================
@@ -470,8 +505,20 @@ public class FusionController : MonoBehaviour
 
         // 清能量 UI
         currentEnergy = 0f;
-        if (energyText) energyText.text = "0.00 MeV";
-        if (energyBar) energyBar.value = 0f;
+
+        if (energyText)
+        {
+            energyText.text = "0.00 MeV";
+        }
+
+        if (energyBar)
+        {
+            energyBar.value = 0f;
+        }
+
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        FusionSendEnergy(0f);
+        #endif
 
         // H、B 回原位、顯示
         proton.position = protonStartPos;
@@ -556,12 +603,21 @@ public class FusionController : MonoBehaviour
         SetStatus("Ready.");
     }
 
-    // =====================================================
-    // Util
-    // =====================================================
+    /*
+ * 更新反應狀態，
+ * 並在 WebGL 環境下同步回傳給 HTML。
+ */
     private void SetStatus(string msg)
     {
-        if (statusText) statusText.text = msg;
+        if (statusText)
+        {
+            statusText.text = msg;
+        }
+
         Debug.Log(msg);
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    FusionSendStatus(msg);
+#endif
     }
 }
