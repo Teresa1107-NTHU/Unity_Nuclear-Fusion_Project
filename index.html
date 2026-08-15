@@ -111,9 +111,28 @@
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
-        createUnityInstance(canvas, config, (progress) => {
-          progressBarFull.style.width = 100 * progress + "%";
-        }).then((unityInstance) => {
+          createUnityInstance(canvas, config, (progress) => {
+
+              /* Unity 自己原本的 Loading Bar */
+              progressBarFull.style.width =
+                  100 * progress + "%";
+
+
+              /*
+               * 將真正的 Unity Loading Progress
+               * 傳送給外層 Alpha-E 網頁。
+               */
+              window.parent.postMessage(
+                  {
+                      source: "fusion-unity",
+                      type: "FusionLoading",
+
+                      progress: progress
+                  },
+                  "*"
+              );
+
+          }).then((unityInstance) => {
             loadingBar.style.display = "none";
 
             /*
