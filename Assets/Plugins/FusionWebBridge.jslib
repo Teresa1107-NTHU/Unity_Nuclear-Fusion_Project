@@ -1,6 +1,7 @@
 /*
  * Fusion WebGL 與外層網頁的通訊橋接。
- * 將 Unity 的反應狀態與能量數值傳送給外層 Alpha-E 網頁。
+ * 將 Unity 的反應狀態、能量數值與反應階段
+ * 傳送給外層 Alpha-E 網頁。
  */
 
 mergeInto(LibraryManager.library, {
@@ -19,6 +20,7 @@ mergeInto(LibraryManager.library, {
         );
     },
 
+
     FusionSendEnergy: function (energy) {
 
         window.parent.postMessage(
@@ -26,6 +28,21 @@ mergeInto(LibraryManager.library, {
                 source: "fusion-unity",
                 type: "FusionEnergy",
                 energy: energy
+            },
+            "*"
+        );
+    },
+
+
+    FusionSendStage: function (stagePtr) {
+
+        const stage = UTF8ToString(stagePtr);
+
+        window.parent.postMessage(
+            {
+                source: "fusion-unity",
+                type: "FusionStage",
+                stage: stage
             },
             "*"
         );
